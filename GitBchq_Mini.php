@@ -154,6 +154,49 @@ class GitBchq_Mini {
         return $messagesList;
     }
 
+    public function postMessageComment($messageId, $commentBody, $attachmentId = null) {
+        $route = $this->buildRoute(array(
+            'message' => $messageId,
+            'comments.xml' => ''
+        ));
+
+        $commentXml = new SimpleXMLElement('<comment></comment>');
+        $commentXml->addChild('body', $commentBody);
+        $commentXml->addChild('attachments');
+        $commentXml->attachments->addChild('file');
+        $commentXml->attachments->file->addChild('file', $attachmentId);
+        $commentXml->attachments->file->addChild('content-type', 'text/plain');
+        $commentXml->attachments->file->addChild('original-filename', '');
+        $commentXml = $commentXml->asXML();
+
+        curl_setopt_array($this->curl(), array(
+            CURLOPT_HTTPHEADER => array(
+                'Content-type: application/octet-stream',
+                'Content-length: ' . strlen($commentXml)
+            ),
+        ));
+
+        $responseXml = $this->post($route, $commentXml);
+        $responseCode = curl_getinfo($this->curl(), CURLINFO_HTTP_CODE);
+        curl_close($this->curl());
+        
+        if($responseCode != 201) {
+            return null;
+        }
+
+        $parser = new SimpleXMLElement($responseXml);
+        return $parser->id;
+    }
+
+    public function getMessageComments($messageId) {
+        $route = $this->buildRoute(array(
+            'posts' => $messageId,
+            'comments.xml' => ''
+        ));
+
+        return curl_exec($this->curl($route));
+    }
+
     /**
      * Get last commit message, replace ANSI escape sequences with Textile markup
      *
@@ -211,6 +254,10 @@ class GitBchq_Mini {
         $parser = new SimpleXMLElement($responseXml);
         return $parser->id;
     }
+
+    public function attachPatch($messageId, $fileId) {
+        
+    }
 }
 
 /**
@@ -233,11 +280,14 @@ $GitBchq = new GitBchq_Mini($BCHQ_APIKEY, $BCHQ_BASE_URL, $BCHQ_PROJECT_ID);
 $messageList = $GitBchq->getMessages();
 echo 'Select a message to update [1-', sizeof($messageList), ']:', PHP_EOL;
 $i = 0;
+echo '* 0. <None>', PHP_EOL;
 foreach($messageList as $messageId => $messageTitle) {
     ++$i;
     echo "* {$i}. [#{$messageId}] {$messageTitle}", PHP_EOL;
 }
-$messagePick = promptUser();
+$messagePickIndex = promptUser() - 1;
+$messagePickId = array_keys($messageList);
+$messagePickId = $messagePickId[(int)$messagePickIndex];
 echo PHP_EOL;
 
 if(promptUser("Upload a patch? y/[n]: ") == "y") {
