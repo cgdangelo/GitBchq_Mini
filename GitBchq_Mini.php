@@ -53,9 +53,31 @@ class GitBchq_Mini {
 
         return $messagesList;
     }
+
+    public function getLastCommit() {
+        $logMessage = trim(`git log -1 --date=rfc -M -C --stat --pretty=medium --color`);
+        $ansiTextile = array(
+            chr(27) . "[33m" => '%{color:orange}',
+            chr(27) . "[m" => '%',
+            chr(27) . "[32m" => '%{color:green}',
+            chr(27) . "[31m" => '%{color:red}'
+        );
+
+        $logMessage = str_replace(array_keys($ansiTextile), $ansiTextile, $logMessage);
+            
+        return $logMessage;
+    }
+
+
+    public function getPatch() {
+        $diff = trim(`git diff -p -1`);
+
+        return $diff;
+    }
 }
 
 $BCHQ_APIKEY=trim(`git config --get basecamp.apikey`);
 $BCHQ_BASE_URL=trim(`git config --get basecamp.baseurl`);
 $BCHQ_PROJECT_ID=trim(`git config --get basecamp.projectid`);
 $GitBchq = new GitBchq_Mini($BCHQ_APIKEY, $BCHQ_BASE_URL, $BCHQ_PROJECT_ID);
+var_dump($GitBchq->getLastCommit());
