@@ -37,7 +37,6 @@ class GitBchq_Mini {
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_SSL_VERIFYPEER => false,
                 CURLOPT_USERPWD => $this->_apiKey . ":",
-                CURLOPT_VERBOSE => true
             ));
         }
 
@@ -115,7 +114,6 @@ class GitBchq_Mini {
                 'Content-type: application/octet-stream',
                 'Content-length: ' . strlen($patchDiff)
             ),
-            CURLOPT_VERBOSE => true
         ));
 
         $response = $this->post('upload', $patchDiff);
@@ -125,7 +123,27 @@ class GitBchq_Mini {
     }
 }
 
+function promptUser($prompt = '') {
+    echo $prompt;
+    return strtolower(trim(fgets(STDIN)));
+}
+
 $BCHQ_APIKEY=trim(`git config --get basecamp.apikey`);
 $BCHQ_BASE_URL=trim(`git config --get basecamp.baseurl`);
 $BCHQ_PROJECT_ID=trim(`git config --get basecamp.projectid`);
 $GitBchq = new GitBchq_Mini($BCHQ_APIKEY, $BCHQ_BASE_URL, $BCHQ_PROJECT_ID);
+
+$messageList = $GitBchq->getMessages();
+echo 'Select a message to update [1-', sizeof($messageList), ']:', PHP_EOL;
+$i = 0;
+foreach($messageList as $messageId => $messageTitle) {
+    ++$i;
+    echo "* {$i}. [#{$messageId}] {$messageTitle}", PHP_EOL;
+}
+$messagePick = promptUser();
+echo PHP_EOL;
+
+if(promptUser("Upload a patch? y/[n]: ") == "y") {
+    echo "* Uploading. . .";
+    //$GitBchq->uploadPatch();
+}
