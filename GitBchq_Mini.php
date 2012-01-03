@@ -3,7 +3,7 @@
 <?php
 
 class GitBchq_Mini {
-    
+
     const BCHQ_RESOURCE_TODO = 'todo_items';
     const BCHQ_RESOURCE_POST = 'posts';
     const BCHQ_RESOURCE_SKIP = 'skip';
@@ -78,7 +78,7 @@ class GitBchq_Mini {
                     'Accept: application/xml',
                     'Content-type: application/xml'
                 ),
-                
+
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_SSL_VERIFYPEER => false,
                 CURLOPT_USERPWD => $this->_apiKey . ":",
@@ -116,30 +116,24 @@ class GitBchq_Mini {
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $formData
         ));
-        
+
         return curl_exec($this->curl($route));
     }
 
     /**
-     * HTTP PUT on route
+     * HTTP PUT on route, which is apparently a fake HTTP POST. Thanks, libcurl.
      *
+     * @param string $route Route relative to base URL
      * @return string Response text
      */
-    private function put($route = null, $file = null) {
+    private function put($route = null) {
         curl_setopt_array($this->curl(), array(
-            CURLOPT_PUT => true
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => '',
+            CURLOPT_CUSTOMREQUEST => 'PUT',
         ));
 
-        return curl_exec($this->curl($route));
-    }
-
-    /**
-     * HTTP DELETE on route
-     *
-     * @return string Response text
-     */
-    private function delete() {
-
+        return curl_exec($this->curl($route));;
     }
 
     /**
@@ -162,59 +156,56 @@ class GitBchq_Mini {
         return $messagesList;
     }
 
+    /**
+     * Post comment on commentable resource
+     *
+     * @param string $resourceType Type of resource (e.g. todo_items, posts)
+     * @param int $resourceId Resource id number
+     * @param string $commentBody Unformatted comment body
+     * @param string $attachmentId File to attach (if any)
+     * @return bool True on success (HTTP 201 response)
+     */
     public function postComment($resourceType, $resourceId, $commentBody, $attachmentId = null) {
         $route = $this->buildRoute(array(
             $resourceType => $resourceId,
             'comments.xml' => ''
         ));
 
-        $commentXml = new SimpleXMLElement('<comment></comment>');
-        $commentXml->addChild('body', $commentBody);
+        $commentXml = new SimpleXMLElement('<?xml version="1.0" encoding="UTF-8"?><comment></comment>');
+        $commentXml->addChild('body', nl2br($commentBody));
         if($attachmentId) {
             $commentXml->addChild('attachments');
             $commentXml->attachments->addChild('file');
             $commentXml->attachments->file->addChild('file', $attachmentId);
             $commentXml->attachments->file->addChild('content-type', 'text/plain');
-            $commentXml->attachments->file->addChild('original-filename', '');
+            $commentXml->attachments->file->addChild('original-filename', 'diff.patch');
         }
 
         $commentXml = $commentXml->asXML();
 
         curl_setopt_array($this->curl(), array(
             CURLOPT_HTTPHEADER => array(
-                'Content-type: application/octet-stream',
+                'Content-type: application/xml',
                 'Content-length: ' . strlen($commentXml)
             ),
         ));
 
-        $responseXml = $this->post($route, $commentXml);
+        $response = $this->post($route, $commentXml);
         $responseCode = curl_getinfo($this->curl(), CURLINFO_HTTP_CODE);
         curl_close($this->curl());
-        
-        if($responseCode != 201) {
-            return null;
-        }
 
-        $parser = new SimpleXMLElement($responseXml);
-        return $parser->id;
-    }
-
-    public function getMessageComments($messageId) {
-        $route = $this->buildRoute(array(
-            'posts' => $messageId,
-            'comments.xml' => ''
-        ));
-
-        return curl_exec($this->curl($route));
+        return ($responseCode == 201);
     }
 
     /**
      * Get last commit message, replace ANSI escape sequences with Textile markup
      *
+     * @FIXME Probably code smell, might want to move this out of the class
+     * @FIXME Textile styling isn't being parsed properly by BaseCamp
      * @return string Textile-ready commit log
      */
     public function getLastCommit() {
-        $logMessage = trim(`git log -1 --date=rfc -M -C --stat --pretty=medium --color`);
+        $logMessage = trim(`git log -1 --date=rfc -M -C --stat --pretty=medium`);
         $ansiTextile = array(
             chr(27) . '[34m' => '%{color:orange}',
             chr(27) . '[33m' => '%{color:orange}',
@@ -224,17 +215,20 @@ class GitBchq_Mini {
         );
 
         $logMessage = str_replace(array_keys($ansiTextile), $ansiTextile, $logMessage);
-            
+
+        $logMessage = str_replace('%%{color', ' %{color', $logMessage);
+
         return $logMessage;
     }
 
     /**
      * Get patch from git diff between HEAD and HEAD^
      *
+     * @FIXME Probably code smell, might want to move this out of the class
      * @return string Patch
      */
     public function getPatch() {
-        $diff = trim(`git diff -p -1`);
+        $diff = trim(`git diff -M -C -p HEAD~1`);
 
         return $diff;
     }
@@ -242,7 +236,7 @@ class GitBchq_Mini {
     /**
      * Upload patch
      *
-     * @return string File id 
+     * @return string File id
      */
     public function uploadPatch() {
         $patchDiff = $this->getPatch();
@@ -257,8 +251,8 @@ class GitBchq_Mini {
         $responseXml = $this->post('upload', $patchDiff);
         $responseCode = curl_getinfo($this->curl(), CURLINFO_HTTP_CODE);
         curl_close($this->curl());
-        
-        if($responseCode != 201) {
+
+        if($responseCode != 200) {
             return null;
         }
 
@@ -292,6 +286,7 @@ class GitBchq_Mini {
 
     /**
      * Get all todo items on a given todo list
+     *
      * @param $todoListId Todo list id
      * @return array Todo items information
      */
@@ -304,6 +299,7 @@ class GitBchq_Mini {
         $todoListItemsXml = new SimpleXMLElement($this->get($route));
         $todoListItemsXml = $todoListItemsXml->xpath('todo-item');
         $todoListItemsList = array();
+
         foreach($todoListItemsXml as $todoListItem) {
             $todoListItemsList["$todoListItem->id"] = array(
                 'content' => "$todoListItem->content",
@@ -318,21 +314,18 @@ class GitBchq_Mini {
      * Mark a todo item as completed
      *
      * @param $todoListItemId Todo item id
-     * @return null|string Response text
+     * @return int Response code
      */
     public function completeTodoListItem($todoListItemId) {
         $route = $this->buildRoute(array(
-            'todo_items' => $todoListItemId
+            'todo_items' => $todoListItemId,
+            'complete.xml' => ''
         ));
 
         $response = $this->put($route);
-        $respopnseCode = curl_getinfo($this->curl(), CURLINFO_HTTP_CODE);
+        $responseCode = curl_getinfo($this->curl(), CURLINFO_HTTP_CODE);
 
-        if($responseCode != 200) {
-            return null;
-        }
-
-        return $response;
+        return $responseCode;
     }
 }
 
@@ -342,9 +335,19 @@ class GitBchq_Mini {
  * @param string $prompt Optional single-line prompt
  * @return string
  */
-function promptUser($prompt = '') {
+function promptUser($prompt = '', $multiLine = false) {
     echo $prompt;
-    return strtolower(trim(fgets(STDIN)));
+
+    $inputLine = '';
+    while(!feof(STDIN)) {
+        $inputLine .= trim(fgets(STDIN));
+
+        if(!$multiLine) {
+            return $inputLine;
+        } else if($multiLine && $inputLine == "<<EOF;") {
+            return $inputLine; 
+        }
+    }
 }
 
 /* Initialization */
@@ -357,13 +360,12 @@ $resourceType = null;
 $resourceId = null;
 
 echo 'Select a resource type: ', PHP_EOL;
-echo '* 0. <None>', PHP_EOL;
 echo '* 1. Todo Lists', PHP_EOL;
 echo '* 2. Messages', PHP_EOL;
+
+/* Picking a resource type */
 while(!$resourceType) {
     switch($resourceType = promptUser()) {
-        case 0:
-            $resourceType = 'skip';
         case 1:
             $resourceType = 'todo_items';
             break;
@@ -376,13 +378,22 @@ while(!$resourceType) {
 }
 echo PHP_EOL;
 
+/* Determining our resource id */
 while(!$resourceId) {
+
     switch($resourceType) {
+
+        /* Todo lists */
         case GitBchq_Mini::BCHQ_RESOURCE_TODO:
-            $todoListList = $GitBchq->getTodoLists();
-            echo 'Select a todo list to update [0-', sizeof($todoListList), ']:', PHP_EOL;
+            /* @TODO Add code for creating todo lists and items? */
+            if(sizeof($todoListList = $GitBchq->getTodoLists()) == 0) {
+                echo '* No todo lists for this project.', PHP_EOL;
+                exit();
+            }
+
+            /* Selecting a todo list */
+            echo 'Select a todo list to update [1-', sizeof($todoListList), ']:', PHP_EOL;
             $i = 0;
-            echo '* 0. <None>', PHP_EOL;
             foreach($todoListList as $todoListId => $todoListData) {
                 ++$i;
                 echo PHP_EOL, "* {$i}. [#{$todoListId}] {$todoListData['name']}", PHP_EOL;
@@ -393,7 +404,7 @@ while(!$resourceId) {
             $todoListPickIndex = null;
             while($todoListPickIndex === null) {
                 $todoListPickIndex = promptUser() - 1;
-                if($todoListPickIndex < 0 || $todoListPickIndex > sizeof($todoListList)) {
+                if($todoListPickIndex < 1 || $todoListPickIndex > sizeof($todoListList)) {
                     $todoListPickIndex = null;
                 }
             }
@@ -401,10 +412,14 @@ while(!$resourceId) {
             $todoListId = $todoListPickId[(int)$todoListPickIndex];
             echo PHP_EOL;
 
-            $todoListItemsList = $GitBchq->getTodoListItems($todoListId);
-            echo 'Select a todo list item to update [0-', sizeof($todoListItemsList), ']:', PHP_EOL;
+            /* Selecting a todo list item */
+            if(sizeof($todoListItemsList = $GitBchq->getTodoListItems($todoListId)) == 0) {
+                echo '* No todo items on this list.', PHP_EOL;
+                exit();
+            }
+
+            echo 'Select a todo list item to update [1-', sizeof($todoListItemsList), ']:', PHP_EOL;
             $i = 0;
-            echo '* 0. <None>', PHP_EOL;
             foreach($todoListItemsList as $todoListItemId => $todoListItemData) {
                 ++$i;
                 $dueDate = new DateTime((string)$todoListItemData['due']);
@@ -412,29 +427,42 @@ while(!$resourceId) {
                 echo "- {$todoListItemData['content']}", PHP_EOL;
             }
             echo PHP_EOL;
-            $todoListItemPickIndex = promptUser() - 1;
+
+            $todoListItemPickIndex = null;
+            while(!$todoListItemPickIndex) {
+                $todoListItemPickIndex = promptUser() - 1;
+                if($todoListItemPickIndex < 1 || $todoListItemPickIndex > sizeof($todoListItemsList)) {
+                    $todoListItemPickIndex = null;
+                }
+            }
+
             $todoListItemPickId = array_keys($todoListItemsList);
             $resourceType = 'todo_items';
             $resourceId = $todoListItemPickId[(int)$todoListItemPickIndex];
             break;
 
+        /* Messages (a.k.a posts) */
         case GitBchq_Mini::BCHQ_RESOURCE_POST:
             $messageList = $GitBchq->getMessages();
-            echo 'Select a message to update [0-', sizeof($messageList), ']:', PHP_EOL;
+            echo 'Select a message to update [1-', sizeof($messageList), ']:', PHP_EOL;
             $i = 0;
-            echo '* 0. <None>', PHP_EOL;
+
             foreach($messageList as $messageId => $messageTitle) {
                 ++$i;
                 echo "* {$i}. [#{$messageId}] {$messageTitle}", PHP_EOL;
             }
-            $messagePickIndex = promptUser() - 1;
+          
+            $messagePickIndex = null;
+            while(!$messagePickIndex) {
+                $messagePickIndex = promptUser() - 1;
+                if($messagePickIndex < 1 || $messagePickIndex > sizeof($messageList)) {
+                    $messagePickIndex = null;
+                }
+            }
+
             $messagePickId = array_keys($messageList);
             $resourceType = 'posts';
             $resourceId = $messagePickId[(int)$messagePickIndex];
-            break;
-
-        case GitBchq_Mini::BCHQ_RESOURCE_SKIP:
-            $resourceId = 0;
             break;
 
         default:
@@ -442,20 +470,37 @@ while(!$resourceId) {
     }
 }
 
-if($resourceId != 0) {
+if($resourceId) {
     $fileId = null;
-    if(promptUser("Upload a patch? y/[n]: ") == "y") {
-        echo "* Uploading. . .";
+    if(strtolower(promptUser("Upload a patch? y/[n]: ")) == "y") {
+        echo "* Uploading. . .", PHP_EOL;
         if($fileId = $GitBchq->uploadPatch()) {
             echo "* Uploaded patch: {$fileId}", PHP_EOL;
         } else {
-            echo "* Failed to upload patch!";
+            echo "* Failed to upload patch!", PHP_EOL;
+            exit();
         }
     }
 
-    if($commentId = $GitBchq->postComment($resourceType, $resourceId, $GitBchq->getLastCommit(), $fileId)) {
+    $commentBody = $GitBchq->getLastCommit();
+    if($otherText = promptUser("Any additional notes or messages to post: ", PHP_EOL)) {
+        $commentBody = $otherText . PHP_EOL . PHP_EOL . $commentBody;
+    }
+
+    if($commentId = $GitBchq->postComment($resourceType, $resourceId, $commentBody, $fileId)) {
         echo "* Added comment: {$commentId}", PHP_EOL;
     } else {
-        echo "* Failed to post comment!";
+        echo "* Failed to post comment!", PHP_EOL;
+        exit();
+    }
+
+    if($resourceType == GitBchq_Mini::BCHQ_RESOURCE_TODO) {
+        if('y' == strtolower(promptUser("Mark this item as complete? y/[n]: "))) {
+            $responseCode = $GitBchq->completeTodoListItem($resourceId);
+
+            if($responseCode == 200) {
+                echo "* Marked todo item #{$resourceId} as completed."
+            } else {
+        }
     }
 }
