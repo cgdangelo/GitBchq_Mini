@@ -162,10 +162,11 @@ class GitBchq_Mini {
     public function getLastCommit() {
         $logMessage = trim(`git log -1 --date=rfc -M -C --stat --pretty=medium --color`);
         $ansiTextile = array(
-            chr(27) . "[33m" => '%{color:orange}',
-            chr(27) . "[m" => '%',
-            chr(27) . "[32m" => '%{color:green}',
-            chr(27) . "[31m" => '%{color:red}'
+            chr(27) . '[34m' => '%{color:orange}',
+            chr(27) . '[33m' => '%{color:orange}',
+            chr(27) . '[m' => '%',
+            chr(27) . '[32m' => '%{color:green}',
+            chr(27) . '[31m' => '%{color:red}'
         );
 
         $logMessage = str_replace(array_keys($ansiTextile), $ansiTextile, $logMessage);
@@ -187,8 +188,7 @@ class GitBchq_Mini {
     /**
      * Upload patch
      *
-     * @TODO Parse response to get attachment id only?
-     * @return string Response XML
+     * @return string File id 
      */
     public function uploadPatch() {
         $patchDiff = $this->getPatch();
@@ -200,10 +200,16 @@ class GitBchq_Mini {
             ),
         ));
 
-        $response = $this->post('upload', $patchDiff);
+        $responseXml = $this->post('upload', $patchDiff);
+        $responseCode = curl_getinfo($this->curl(), CURLINFO_HTTP_CODE);
         curl_close($this->curl());
         
-        return $response;
+        if($responseCode != 201) {
+            return null;
+        }
+
+        $parser = new SimpleXMLElement($responseXml);
+        return $parser->id;
     }
 }
 
@@ -236,5 +242,9 @@ echo PHP_EOL;
 
 if(promptUser("Upload a patch? y/[n]: ") == "y") {
     echo "* Uploading. . .";
-    //$GitBchq->uploadPatch();
+    if($fileId = $GitBchq->uploadPatch()) {
+        echo "* Uploaded patch: {$fileId}", PHP_EOL;
+    } else {
+        echo "* Upload failed!";
+    }
 }
