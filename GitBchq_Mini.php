@@ -6,6 +6,7 @@ class GitBchq_Mini {
     
     const BCHQ_RESOURCE_TODO = 'todo_items';
     const BCHQ_RESOURCE_POST = 'posts';
+    const BCHQ_RESOURCE_SKIP = 'skip';
 
     /**
      * BaseCamp user API key
@@ -124,8 +125,12 @@ class GitBchq_Mini {
      *
      * @return string Response text
      */
-    private function put() {
+    private function put($route = null, $file = null) {
+        curl_setopt_array($this->curl(), array(
+            CURLOPT_PUT => true
+        ));
 
+        return curl_exec($this->curl($route));
     }
 
     /**
@@ -261,6 +266,11 @@ class GitBchq_Mini {
         return $parser->id;
     }
 
+    /**
+     * Get all todo lists for project.
+     *
+     * @return array Todo list information
+     */
     public function getTodoLists() {
         $route = $this->buildRoute(array(
             'projects' => $this->_projectId,
@@ -280,6 +290,11 @@ class GitBchq_Mini {
         return $todoListList;
     }
 
+    /**
+     * Get all todo items on a given todo list
+     * @param $todoListId Todo list id
+     * @return array Todo items information
+     */
     public function getTodoListItems($todoListId) {
         $route = $this->buildRoute(array(
             'todo_lists' => $todoListId,
@@ -298,11 +313,33 @@ class GitBchq_Mini {
 
         return $todoListItemsList;
     }
+
+    /**
+     * Mark a todo item as completed
+     *
+     * @param $todoListItemId Todo item id
+     * @return null|string Response text
+     */
+    public function completeTodoListItem($todoListItemId) {
+        $route = $this->buildRoute(array(
+            'todo_items' => $todoListItemId
+        ));
+
+        $response = $this->put($route);
+        $respopnseCode = curl_getinfo($this->curl(), CURLINFO_HTTP_CODE);
+
+        if($responseCode != 200) {
+            return null;
+        }
+
+        return $response;
+    }
 }
 
 /**
  * Prompt user for input into stdin
  *
+ * @param string $prompt Optional single-line prompt
  * @return string
  */
 function promptUser($prompt = '') {
@@ -320,10 +357,13 @@ $resourceType = null;
 $resourceId = null;
 
 echo 'Select a resource type: ', PHP_EOL;
+echo '* 0. <None>', PHP_EOL;
 echo '* 1. Todo Lists', PHP_EOL;
 echo '* 2. Messages', PHP_EOL;
 while(!$resourceType) {
     switch($resourceType = promptUser()) {
+        case 0:
+            $resourceType = 'skip';
         case 1:
             $resourceType = 'todo_items';
             break;
@@ -393,23 +433,29 @@ while(!$resourceId) {
             $resourceId = $messagePickId[(int)$messagePickIndex];
             break;
 
+        case GitBchq_Mini::BCHQ_RESOURCE_SKIP:
+            $resourceId = 0;
+            break;
+
         default:
             $resourceId = null;
     }
 }
 
-$fileId = null;
-if(promptUser("Upload a patch? y/[n]: ") == "y") {
-    echo "* Uploading. . .";
-    if($fileId = $GitBchq->uploadPatch()) {
-        echo "* Uploaded patch: {$fileId}", PHP_EOL;
-    } else {
-        echo "* Failed to upload patch!";
+if($resourceId != 0) {
+    $fileId = null;
+    if(promptUser("Upload a patch? y/[n]: ") == "y") {
+        echo "* Uploading. . .";
+        if($fileId = $GitBchq->uploadPatch()) {
+            echo "* Uploaded patch: {$fileId}", PHP_EOL;
+        } else {
+            echo "* Failed to upload patch!";
+        }
     }
-}
 
-if($commentId = $GitBchq->postComment($resourceType, $resourceId, $GitBchq->getLastCommit(), $fileId)) {
-    echo "* Added comment: {$commentId}", PHP_EOL;
-} else {
-    echo "* Failed to post comment!";
+    if($commentId = $GitBchq->postComment($resourceType, $resourceId, $GitBchq->getLastCommit(), $fileId)) {
+        echo "* Added comment: {$commentId}", PHP_EOL;
+    } else {
+        echo "* Failed to post comment!";
+    }
 }
