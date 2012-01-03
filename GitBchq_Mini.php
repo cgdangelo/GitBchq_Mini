@@ -3,6 +3,9 @@
 <?php
 
 class GitBchq_Mini {
+    
+    const BCHQ_RESOURCE_TODO = 'todo_items';
+    const BCHQ_RESOURCE_POST = 'posts';
 
     /**
      * BaseCamp user API key
@@ -154,19 +157,22 @@ class GitBchq_Mini {
         return $messagesList;
     }
 
-    public function postMessageComment($messageId, $commentBody, $attachmentId = null) {
+    public function postComment($resourceType, $resourceId, $commentBody, $attachmentId = null) {
         $route = $this->buildRoute(array(
-            'message' => $messageId,
+            $resourceType => $resourceId,
             'comments.xml' => ''
         ));
 
         $commentXml = new SimpleXMLElement('<comment></comment>');
         $commentXml->addChild('body', $commentBody);
-        $commentXml->addChild('attachments');
-        $commentXml->attachments->addChild('file');
-        $commentXml->attachments->file->addChild('file', $attachmentId);
-        $commentXml->attachments->file->addChild('content-type', 'text/plain');
-        $commentXml->attachments->file->addChild('original-filename', '');
+        if($attachmentId) {
+            $commentXml->addChild('attachments');
+            $commentXml->attachments->addChild('file');
+            $commentXml->attachments->file->addChild('file', $attachmentId);
+            $commentXml->attachments->file->addChild('content-type', 'text/plain');
+            $commentXml->attachments->file->addChild('original-filename', '');
+        }
+
         $commentXml = $commentXml->asXML();
 
         curl_setopt_array($this->curl(), array(
@@ -255,8 +261,42 @@ class GitBchq_Mini {
         return $parser->id;
     }
 
-    public function attachPatch($messageId, $fileId) {
-        
+    public function getTodoLists() {
+        $route = $this->buildRoute(array(
+            'projects' => $this->_projectId,
+            'todo_lists.xml' => ''
+        ));
+
+        $todoListXml = new SimpleXMLElement($this->get($route));
+        $todoListXml = $todoListXml->xpath('todo-list');
+        $todoListList = array();
+        foreach($todoListXml as $todoList) {
+            $todoListList["$todoList->id"] = array(
+                'name' => "$todoList->name",
+                'description' => "$todoList->description"
+            );
+        }
+
+        return $todoListList;
+    }
+
+    public function getTodoListItems($todoListId) {
+        $route = $this->buildRoute(array(
+            'todo_lists' => $todoListId,
+            'todo_items.xml' => ''
+        ));
+
+        $todoListItemsXml = new SimpleXMLElement($this->get($route));
+        $todoListItemsXml = $todoListItemsXml->xpath('todo-item');
+        $todoListItemsList = array();
+        foreach($todoListItemsXml as $todoListItem) {
+            $todoListItemsList["$todoListItem->id"] = array(
+                'content' => "$todoListItem->content",
+                'due' => $todoListItem->{'due-at'}
+            );
+        }
+
+        return $todoListItemsList;
     }
 }
 
@@ -276,25 +316,100 @@ $BCHQ_BASE_URL=trim(`git config --get basecamp.baseurl`);
 $BCHQ_PROJECT_ID=trim(`git config --get basecamp.projectid`);
 $GitBchq = new GitBchq_Mini($BCHQ_APIKEY, $BCHQ_BASE_URL, $BCHQ_PROJECT_ID);
 
-/* Work */
-$messageList = $GitBchq->getMessages();
-echo 'Select a message to update [1-', sizeof($messageList), ']:', PHP_EOL;
-$i = 0;
-echo '* 0. <None>', PHP_EOL;
-foreach($messageList as $messageId => $messageTitle) {
-    ++$i;
-    echo "* {$i}. [#{$messageId}] {$messageTitle}", PHP_EOL;
+$resourceType = null;
+$resourceId = null;
+
+echo 'Select a resource type: ', PHP_EOL;
+echo '* 1. Todo Lists', PHP_EOL;
+echo '* 2. Messages', PHP_EOL;
+while(!$resourceType) {
+    switch($resourceType = promptUser()) {
+        case 1:
+            $resourceType = 'todo_items';
+            break;
+        case 2:
+            $resourceType = 'posts';
+            break;
+        default:
+            $resourceType = null;
+    }
 }
-$messagePickIndex = promptUser() - 1;
-$messagePickId = array_keys($messageList);
-$messagePickId = $messagePickId[(int)$messagePickIndex];
 echo PHP_EOL;
 
+while(!$resourceId) {
+    switch($resourceType) {
+        case GitBchq_Mini::BCHQ_RESOURCE_TODO:
+            $todoListList = $GitBchq->getTodoLists();
+            echo 'Select a todo list to update [0-', sizeof($todoListList), ']:', PHP_EOL;
+            $i = 0;
+            echo '* 0. <None>', PHP_EOL;
+            foreach($todoListList as $todoListId => $todoListData) {
+                ++$i;
+                echo PHP_EOL, "* {$i}. [#{$todoListId}] {$todoListData['name']}", PHP_EOL;
+                echo "- {$todoListData['description']}", PHP_EOL;
+            }
+            echo PHP_EOL;
+
+            $todoListPickIndex = null;
+            while($todoListPickIndex === null) {
+                $todoListPickIndex = promptUser() - 1;
+                if($todoListPickIndex < 0 || $todoListPickIndex > sizeof($todoListList)) {
+                    $todoListPickIndex = null;
+                }
+            }
+            $todoListPickId = array_keys($todoListList);
+            $todoListId = $todoListPickId[(int)$todoListPickIndex];
+            echo PHP_EOL;
+
+            $todoListItemsList = $GitBchq->getTodoListItems($todoListId);
+            echo 'Select a todo list item to update [0-', sizeof($todoListItemsList), ']:', PHP_EOL;
+            $i = 0;
+            echo '* 0. <None>', PHP_EOL;
+            foreach($todoListItemsList as $todoListItemId => $todoListItemData) {
+                ++$i;
+                $dueDate = new DateTime((string)$todoListItemData['due']);
+                echo PHP_EOL, "* {$i}. [#{$todoListItemId}] ", $dueDate->diff(new DateTime())->format('+%a days, %H hours'), PHP_EOL;
+                echo "- {$todoListItemData['content']}", PHP_EOL;
+            }
+            echo PHP_EOL;
+            $todoListItemPickIndex = promptUser() - 1;
+            $todoListItemPickId = array_keys($todoListItemsList);
+            $resourceType = 'todo_items';
+            $resourceId = $todoListItemPickId[(int)$todoListItemPickIndex];
+            break;
+
+        case GitBchq_Mini::BCHQ_RESOURCE_POST:
+            $messageList = $GitBchq->getMessages();
+            echo 'Select a message to update [0-', sizeof($messageList), ']:', PHP_EOL;
+            $i = 0;
+            echo '* 0. <None>', PHP_EOL;
+            foreach($messageList as $messageId => $messageTitle) {
+                ++$i;
+                echo "* {$i}. [#{$messageId}] {$messageTitle}", PHP_EOL;
+            }
+            $messagePickIndex = promptUser() - 1;
+            $messagePickId = array_keys($messageList);
+            $resourceType = 'posts';
+            $resourceId = $messagePickId[(int)$messagePickIndex];
+            break;
+
+        default:
+            $resourceId = null;
+    }
+}
+
+$fileId = null;
 if(promptUser("Upload a patch? y/[n]: ") == "y") {
     echo "* Uploading. . .";
     if($fileId = $GitBchq->uploadPatch()) {
         echo "* Uploaded patch: {$fileId}", PHP_EOL;
     } else {
-        echo "* Upload failed!";
+        echo "* Failed to upload patch!";
     }
+}
+
+if($commentId = $GitBchq->postComment($resourceType, $resourceId, $GitBchq->getLastCommit(), $fileId)) {
+    echo "* Added comment: {$commentId}", PHP_EOL;
+} else {
+    echo "* Failed to post comment!";
 }
