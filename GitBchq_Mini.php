@@ -178,7 +178,11 @@ class GitBchq_Mini {
             $commentXml->attachments->addChild('file');
             $commentXml->attachments->file->addChild('file', $attachmentId);
             $commentXml->attachments->file->addChild('content-type', 'text/plain');
-            $commentXml->attachments->file->addChild('original-filename', 'diff.patch');
+
+            /* Ugh */
+            $_head = trim(`git log --format=%h -1`);
+            $_subHead = trim(`git log --format=%h HEAD^`);
+            $commentXml->attachments->file->addChild('original-filename', "{$_subHead}-{$_head}.patch");
         }
 
         $commentXml = $commentXml->asXML();
@@ -338,14 +342,17 @@ class GitBchq_Mini {
 function promptUser($prompt = '', $multiLine = false) {
     echo $prompt;
 
+    $inputData = '';
     $inputLine = '';
     while(!feof(STDIN)) {
-        $inputLine .= trim(fgets(STDIN));
+        $inputLine = trim(fgets(STDIN));
 
         if(!$multiLine) {
             return $inputLine;
-        } else if($multiLine && $inputLine == "<<EOF;") {
-            return $inputLine; 
+        } else if($inputLine == '%EOF%') {
+            return $inputData; 
+        } else {
+            $inputData .= $inputLine . PHP_EOL;
         }
     }
 }
@@ -404,7 +411,7 @@ while(!$resourceId) {
             $todoListPickIndex = null;
             while($todoListPickIndex === null) {
                 $todoListPickIndex = promptUser() - 1;
-                if($todoListPickIndex < 1 || $todoListPickIndex > sizeof($todoListList)) {
+                if($todoListPickIndex < 0 || $todoListPickIndex > sizeof($todoListList)) {
                     $todoListPickIndex = null;
                 }
             }
@@ -429,12 +436,7 @@ while(!$resourceId) {
             echo PHP_EOL;
 
             $todoListItemPickIndex = null;
-            while(!$todoListItemPickIndex) {
                 $todoListItemPickIndex = promptUser() - 1;
-                if($todoListItemPickIndex < 1 || $todoListItemPickIndex > sizeof($todoListItemsList)) {
-                    $todoListItemPickIndex = null;
-                }
-            }
 
             $todoListItemPickId = array_keys($todoListItemsList);
             $resourceType = 'todo_items';
@@ -455,7 +457,7 @@ while(!$resourceId) {
             $messagePickIndex = null;
             while(!$messagePickIndex) {
                 $messagePickIndex = promptUser() - 1;
-                if($messagePickIndex < 1 || $messagePickIndex > sizeof($messageList)) {
+                if($messagePickIndex < 0 || $messagePickIndex > sizeof($messageList)) {
                     $messagePickIndex = null;
                 }
             }
@@ -483,7 +485,7 @@ if($resourceId) {
     }
 
     $commentBody = $GitBchq->getLastCommit();
-    if($otherText = promptUser("Any additional notes or messages to post: ", PHP_EOL)) {
+    if($otherText = promptUser("Any additional notes or messages to post: " . PHP_EOL, true)) {
         $commentBody = $otherText . PHP_EOL . PHP_EOL . $commentBody;
     }
 
@@ -499,8 +501,11 @@ if($resourceId) {
             $responseCode = $GitBchq->completeTodoListItem($resourceId);
 
             if($responseCode == 200) {
-                echo "* Marked todo item #{$resourceId} as completed."
+                echo "* Marked todo item #{$resourceId} as completed.";
             } else {
+                echo "* Failed to mark todo item as completed!";
+            }
+            echo PHP_EOL;
         }
     }
 }
