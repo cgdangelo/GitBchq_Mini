@@ -202,49 +202,12 @@ class GitBchq_Mini {
     }
 
     /**
-     * Get last commit message, replace ANSI escape sequences with Textile markup
-     *
-     * @FIXME Probably code smell, might want to move this out of the class
-     * @FIXME Textile styling isn't being parsed properly by BaseCamp
-     * @return string Textile-ready commit log
-     */
-    public function getLastCommit() {
-        $logMessage = trim(`git log -1 --date=rfc -M -C --stat --pretty=medium`);
-        $ansiTextile = array(
-            chr(27) . '[34m' => '%{color:orange}',
-            chr(27) . '[33m' => '%{color:orange}',
-            chr(27) . '[m' => '%',
-            chr(27) . '[32m' => '%{color:green}',
-            chr(27) . '[31m' => '%{color:red}'
-        );
-
-        $logMessage = str_replace(array_keys($ansiTextile), $ansiTextile, $logMessage);
-
-        $logMessage = str_replace('%%{color', ' %{color', $logMessage);
-
-        return $logMessage;
-    }
-
-    /**
-     * Get patch from git diff between HEAD and HEAD^
-     *
-     * @FIXME Probably code smell, might want to move this out of the class
-     * @return string Patch
-     */
-    public function getPatch() {
-        $diff = trim(`git diff -M -C -p HEAD~1`);
-
-        return $diff;
-    }
-
-    /**
      * Upload patch
      *
+     * @param string $patchDiff Patch from git-diff
      * @return string File id
      */
-    public function uploadPatch() {
-        $patchDiff = $this->getPatch();
-
+    public function uploadPatch($patchDiff) {
         curl_setopt_array($this->curl(), array(
             CURLOPT_HTTPHEADER => array(
                 'Content-type: application/octet-stream',
@@ -436,7 +399,12 @@ while(!$resourceId) {
             echo PHP_EOL;
 
             $todoListItemPickIndex = null;
+            while($todoListItemPickIndex === null) {
                 $todoListItemPickIndex = promptUser() - 1;
+                if($todoListItemPickIndex < 0 || $todoListItemPickIndex > sizeof($todoListItemsList)) {
+                    $todoListItemPickIndex = null;
+                }
+            }
 
             $todoListItemPickId = array_keys($todoListItemsList);
             $resourceType = 'todo_items';
@@ -455,7 +423,7 @@ while(!$resourceId) {
             }
           
             $messagePickIndex = null;
-            while(!$messagePickIndex) {
+            while($messagePickIndex === null) {
                 $messagePickIndex = promptUser() - 1;
                 if($messagePickIndex < 0 || $messagePickIndex > sizeof($messageList)) {
                     $messagePickIndex = null;
@@ -475,8 +443,10 @@ while(!$resourceId) {
 if($resourceId) {
     $fileId = null;
     if(strtolower(promptUser("Upload a patch? y/[n]: ")) == "y") {
+        $patchDiff = trim(`git diff -M -C -p HEAD~1`);
+
         echo "* Uploading. . .", PHP_EOL;
-        if($fileId = $GitBchq->uploadPatch()) {
+        if($fileId = $GitBchq->uploadPatch($patchDiff)) {
             echo "* Uploaded patch: {$fileId}", PHP_EOL;
         } else {
             echo "* Failed to upload patch!", PHP_EOL;
@@ -484,7 +454,7 @@ if($resourceId) {
         }
     }
 
-    $commentBody = $GitBchq->getLastCommit();
+    $commentBody = trim(`git log -1 --date=rfc -M -C --stat --pretty=medium`);
     if($otherText = promptUser("Any additional notes or messages to post: " . PHP_EOL, true)) {
         $commentBody = $otherText . PHP_EOL . PHP_EOL . $commentBody;
     }
