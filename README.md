@@ -6,6 +6,10 @@ GitBchq
 
 An overengineered Git-Basecamp integration utility, adapted into an underengineered post-commit script thing.
 
+You can use this to post commit logs and patches to todo lists and messages. It'll look something like this:
+
+![Example](http://i.imgur.com/nERLb.png)
+
 LICENSE
 -------
 
@@ -19,7 +23,7 @@ INSTALLATION
 USE
 ---
 
-1. Set the following git variables:
+1. Set the following git variables with `git config`:
     * **basecamp.projectid** Project id for this repository
     * **basecamp.apikey** Your BaseCamp API key
     * **basecamp.baseurl** e.g. https://company.basecamphq.com/
