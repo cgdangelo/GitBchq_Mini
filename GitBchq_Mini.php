@@ -6,7 +6,6 @@ class GitBchq_Mini {
 
     const BCHQ_RESOURCE_TODO = 'todo_items';
     const BCHQ_RESOURCE_POST = 'posts';
-    const BCHQ_RESOURCE_SKIP = 'skip';
 
     /**
      * BaseCamp user API key
@@ -37,13 +36,20 @@ class GitBchq_Mini {
     private $_curl;
 
     /**
+     * SHA1 for HEAD
+     *
+     * @var string $_head
+     */
+    protected $_head;
+
+    /**
      * Constructor
      *
      * @param string $apiKey BaseCamp user API key
      * @param string $baseUrl BaseCamp URL
      * @param int $projectId BaseCamp project id
      */
-    public function __construct($apiKey, $baseUrl, $projectId) {
+    public function __construct($apiKey, $baseUrl, $projectId, $_head = 'diff') {
         $this->_apiKey = $apiKey;
         $this->_baseUrl = $baseUrl;
         $this->_projectId = $projectId;
@@ -178,11 +184,7 @@ class GitBchq_Mini {
             $commentXml->attachments->addChild('file');
             $commentXml->attachments->file->addChild('file', $attachmentId);
             $commentXml->attachments->file->addChild('content-type', 'text/plain');
-
-            /* Ugh */
-            $_head = trim(`git log --format=%h -1`);
-            $_subHead = trim(`git log --format=%h HEAD^`);
-            $commentXml->attachments->file->addChild('original-filename', "{$_subHead}-{$_head}.patch");
+            $commentXml->attachments->file->addChild('original-filename', "{$this->_head}.patch");
         }
 
         $commentXml = $commentXml->asXML();
@@ -324,7 +326,8 @@ function promptUser($prompt = '', $multiLine = false) {
 $BCHQ_APIKEY=trim(`git config --get basecamp.apikey`);
 $BCHQ_BASE_URL=trim(`git config --get basecamp.baseurl`);
 $BCHQ_PROJECT_ID=trim(`git config --get basecamp.projectid`);
-$GitBchq = new GitBchq_Mini($BCHQ_APIKEY, $BCHQ_BASE_URL, $BCHQ_PROJECT_ID);
+$BCHQ_SHA1_HEAD=str_replace(PHP_EOL, '-', trim(`git log --format=%h -2`));
+$GitBchq = new GitBchq_Mini($BCHQ_APIKEY, $BCHQ_BASE_URL, $BCHQ_PROJECT_ID, $BCHQ_SHA1_HEAD);
 
 $resourceType = null;
 $resourceId = null;
@@ -459,23 +462,31 @@ if($resourceId) {
         $commentBody = $otherText . PHP_EOL . PHP_EOL . $commentBody;
     }
 
-    if($commentId = $GitBchq->postComment($resourceType, $resourceId, $commentBody, $fileId)) {
-        echo "* Added comment: {$commentId}", PHP_EOL;
-    } else {
-        echo "* Failed to post comment!", PHP_EOL;
-        exit();
-    }
+    echo "<<<<< COMMENT START", PHP_EOL;
+    echo $commentBody;
+    echo "COMMENT END >>>>>", PHP_EOL;
 
-    if($resourceType == GitBchq_Mini::BCHQ_RESOURCE_TODO) {
-        if('y' == strtolower(promptUser("Mark this item as complete? y/[n]: "))) {
-            $responseCode = $GitBchq->completeTodoListItem($resourceId);
-
-            if($responseCode == 200) {
-                echo "* Marked todo item #{$resourceId} as completed.";
-            } else {
-                echo "* Failed to mark todo item as completed!";
-            }
-            echo PHP_EOL;
+    if('n' != strtolower(promptUser('Post the above comment? [y]/n:')) {
+        if($GitBchq->postComment($resourceType, $resourceId, $commentBody, $fileId) == 1) {
+            echo "* Added comment", PHP_EOL;
+        } else {
+            echo "* Failed to post comment!", PHP_EOL;
+            exit();
         }
+
+        if($resourceType == GitBchq_Mini::BCHQ_RESOURCE_TODO) {
+            if('y' == strtolower(promptUser("Mark this item as complete? y/[n]: "))) {
+                $responseCode = $GitBchq->completeTodoListItem($resourceId);
+
+                if($responseCode == 200) {
+                    echo "* Marked todo item #{$resourceId} as completed.";
+                } else {
+                    echo "* Failed to mark todo item as completed!";
+                }
+                echo PHP_EOL;
+            }
+        }
+    } else {
+        echo "* Aborting. . .", PHP_EOL;
     }
 }
